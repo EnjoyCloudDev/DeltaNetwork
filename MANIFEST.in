@@ -1,0 +1,22 @@
+recursive-include demos *.py *.yaml *.html *.css *.js *.xml *.sql README
+recursive-include docs *
+prune docs/build
+include delta_net/py.typed
+include delta_net/speedups.c
+include delta_net/test/README
+include delta_net/test/csv_translations/fr_FR.csv
+include delta_net/test/gettext_translations/fr_FR/LC_MESSAGES/delta_net_test.mo
+include delta_net/test/gettext_translations/fr_FR/LC_MESSAGES/delta_net_test.po
+include delta_net/test/options_test.cfg
+include delta_net/test/static/robots.txt
+include delta_net/test/static/sample.xml
+include delta_net/test/static/sample.xml.gz
+include delta_net/test/static/sample.xml.bz2
+include delta_net/test/static/dir/index.html
+include delta_net/test/static_foo.txt
+include delta_net/test/templates/utf8.html
+include delta_net/test/test.crt
+include delta_net/test/test.key
+include LICENSE
+include README.rst
+include runtests.sh

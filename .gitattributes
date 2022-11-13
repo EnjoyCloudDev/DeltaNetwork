@@ -1,0 +1,4 @@
+# Tests of static file handling assume unix-style line endings.
+delta_net/test/static/*.txt text eol=lf
+delta_net/test/static/dir/*.html text eol=lf
+delta_net/test/templates/*.html text eol=lf
