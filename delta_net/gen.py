@@ -109,7 +109,7 @@ def coroutine(func: Callable[..., _T]) -> Callable[..., "Future[_T]"]:
 def coroutine(
     func: Union[Callable[..., "Generator[Any, Any, _T]"], Callable[..., _T]]
 ) -> Callable[..., "Future[_T]"]:
-    
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         # type: (*Any, **Any) -> Future[_T]
@@ -154,7 +154,7 @@ def coroutine(
                     # We do this by exploiting the public API
                     # add_done_callback() instead of putting a private
                     # attribute on the Future.
-                    # (GitHub issues #1769, #2229).
+
                     runner = Runner(ctx_run, result, future, yielded)
                     future.add_done_callback(lambda _: runner)
                 yielded = None
@@ -181,14 +181,28 @@ def coroutine(
 def is_coroutine_function(func: Any) -> bool:
     """Return whether *func* is a coroutine function, i.e. a function
     wrapped with `~.gen.coroutine`.
-
     .. versionadded:: 4.5
     """
     return getattr(func, "__delta_net_coroutine__", False)
 
 
 class Return(Exception):
-   
+    """Special exception to return a value from a `coroutine`.
+    If this exception is raised, its value argument is used as the
+    result of the coroutine::
+        @gen.coroutine
+        def fetch_json(url):
+            response = yield AsyncHTTPClient().fetch(url)
+            raise gen.Return(json_decode(response.body))
+    In Python 3.3, this exception is no longer necessary: the ``return``
+    statement can be used directly to return a value (previously
+    ``yield`` and ``return`` with a value could not be combined in the
+    same function).
+    By analogy with the return statement, the value argument is optional,
+    but it is never necessary to ``raise gen.Return()``.  The ``return``
+    statement can be used with no arguments instead.
+    """
+
     def __init__(self, value: Any = None) -> None:
         super().__init__()
         self.value = value
@@ -197,7 +211,48 @@ class Return(Exception):
 
 
 class WaitIterator(object):
-   
+    """Provides an iterator to yield the results of awaitables as they finish.
+    Yielding a set of awaitables like this:
+    ``results = yield [awaitable1, awaitable2]``
+    pauses the coroutine until both ``awaitable1`` and ``awaitable2``
+    return, and then restarts the coroutine with the results of both
+    awaitables. If either awaitable raises an exception, the
+    expression will raise that exception and all the results will be
+    lost.
+    If you need to get the result of each awaitable as soon as possible,
+    or if you need the result of some awaitables even if others produce
+    errors, you can use ``WaitIterator``::
+      wait_iterator = gen.WaitIterator(awaitable1, awaitable2)
+      while not wait_iterator.done():
+          try:
+              result = yield wait_iterator.next()
+          except Exception as e:
+              print("Error {} from {}".format(e, wait_iterator.current_future))
+          else:
+              print("Result {} received from {} at {}".format(
+                  result, wait_iterator.current_future,
+                  wait_iterator.current_index))
+    Because results are returned as soon as they are available the
+    output from the iterator *will not be in the same order as the
+    input arguments*. If you need to know which future produced the
+    current result, you can use the attributes
+    ``WaitIterator.current_future``, or ``WaitIterator.current_index``
+    to get the index of the awaitable from the input list. (if keyword
+    arguments were used in the construction of the `WaitIterator`,
+    ``current_index`` will use the corresponding keyword).
+    On Python 3.5, `WaitIterator` implements the async iterator
+    protocol, so it can be used with the ``async for`` statement (note
+    that in this version the entire iteration is aborted if any value
+    raises an exception, while the previous example can continue past
+    individual errors)::
+      async for result in gen.WaitIterator(future1, future2):
+          print("Result {} received from {} at {}".format(
+              result, wait_iterator.current_future,
+              wait_iterator.current_index))
+
+       Added ``async for`` support in Python 3.5.
+    """
+
     _unfinished = {}  # type: Dict[Future, Union[int, str]]
 
     def __init__(self, *args: Future, **kwargs: Future) -> None:
@@ -229,7 +284,6 @@ class WaitIterator(object):
 
     def next(self) -> Future:
         """Returns a `.Future` that will yield the next available result.
-
         Note that this `.Future` will not be the same object as any of
         the inputs.
         """
@@ -275,7 +329,40 @@ def multi(
     children: Union[List[_Yieldable], Dict[Any, _Yieldable]],
     quiet_exceptions: "Union[Type[Exception], Tuple[Type[Exception], ...]]" = (),
 ) -> "Union[Future[List], Future[Dict]]":
-   
+    """Runs multiple asynchronous operations in parallel.
+    ``children`` may either be a list or a dict whose values are
+    yieldable objects. ``multi()`` returns a new yieldable
+    object that resolves to a parallel structure containing their
+    results. If ``children`` is a list, the result is a list of
+    results in the same order; if it is a dict, the result is a dict
+    with the same keys.
+    That is, ``results = yield multi(list_of_futures)`` is equivalent
+    to::
+        results = []
+        for future in list_of_futures:
+            results.append(yield future)
+    If any children raise exceptions, ``multi()`` will raise the first
+    one. All others will be logged, unless they are of types
+    contained in the ``quiet_exceptions`` argument.
+    In a ``yield``-based coroutine, it is not normally necessary to
+    call this function directly, since the coroutine runner will
+    do it automatically when a list or dict is yielded. However,
+    it is necessary in ``await``-based coroutines, or to pass
+    the ``quiet_exceptions`` argument.
+    This function is available under the names ``multi()`` and ``Multi()``
+    for historical reasons.
+    Cancelling a `.Future` returned by ``multi()`` does not cancel its
+    children. `asyncio.gather` is similar to ``multi()``, but it does
+    cancel its children.
+
+       If multiple yieldables fail, any exceptions after the first
+       (which is raised) will be logged. Added the ``quiet_exceptions``
+       argument to suppress this logging for selected exception types.
+
+       Replaced the class ``Multi`` and the function ``multi_future``
+       with a unified function ``multi``. Added support for yieldables
+       other than ``YieldPoint`` and `.Future`.
+    """
     return multi_future(children, quiet_exceptions=quiet_exceptions)
 
 
@@ -286,7 +373,15 @@ def multi_future(
     children: Union[List[_Yieldable], Dict[Any, _Yieldable]],
     quiet_exceptions: "Union[Type[Exception], Tuple[Type[Exception], ...]]" = (),
 ) -> "Union[Future[List], Future[Dict]]":
-   
+    """Wait for multiple asynchronous futures in parallel.
+    Since delta_net v1.0, this function is exactly the same as `multi`.
+
+       If multiple ``Futures`` fail, any exceptions after the first (which is
+       raised) will be logged. Added the ``quiet_exceptions``
+       argument to suppress this logging for selected exception types.
+
+       Use `multi` instead.
+    """
     if isinstance(children, dict):
         keys = list(children.keys())  # type: Optional[List]
         children_seq = children.values()  # type: Iterable
@@ -333,7 +428,16 @@ def multi_future(
 
 
 def maybe_future(x: Any) -> Future:
-    
+    """Converts ``x`` into a `.Future`.
+    If ``x`` is already a `.Future`, it is simply returned; otherwise
+    it is wrapped in a new `.Future`.  This is suitable for use as
+    ``result = yield gen.maybe_future(f())`` when you don't know whether
+    ``f()`` returns a `.Future` or not.
+    .. deprecated::alpha
+       This function only handles ``Futures``, not other yieldable objects.
+       Instead of `maybe_future`, check for the non-future result types
+       you expect (often just ``None``), and ``yield`` anything unknown.
+    """
     if is_future(x):
         return x
     else:
@@ -347,7 +451,27 @@ def with_timeout(
     future: _Yieldable,
     quiet_exceptions: "Union[Type[Exception], Tuple[Type[Exception], ...]]" = (),
 ) -> Future:
-   
+    """Wraps a `.Future` (or other yieldable object) in a timeout.
+    Raises `delta_net.util.TimeoutError` if the input future does not
+    complete before ``timeout``, which may be specified in any form
+    allowed by `.IOLoop.add_timeout` (i.e. a `datetime.timedelta` or
+    an absolute time relative to `.IOLoop.time`)
+    If the wrapped `.Future` fails after it has timed out, the exception
+    will be logged unless it is either of a type contained in
+    ``quiet_exceptions`` (which may be an exception type or a sequence of
+    types), or an ``asyncio.CancelledError``.
+    The wrapped `.Future` is not canceled when the timeout expires,
+    permitting it to be reused. `asyncio.wait_for` is similar to this
+    function but it does cancel the wrapped `.Future` on timeout.
+    .. versionadded:: 1113
+
+       Added the ``quiet_exceptions`` argument and the logging of unhandled
+       exceptions.
+       Added support for yieldable objects other than `.Future`.
+       ``asyncio.CancelledError`` is now always considered "quiet".
+       ``delta_net.util.TimeoutError`` is now an alias to ``asyncio.TimeoutError``.
+       versionchanged:: 1126
+    """
     # It's tempting to optimize this by cancelling the input future on timeout
     # instead of creating a new one, but A) we can't know if we are the only
     # one waiting on the input future, so cancelling it might disrupt other
@@ -393,7 +517,15 @@ def with_timeout(
 
 
 def sleep(duration: float) -> "Future[None]":
-   
+    """Return a `.Future` that resolves after the given number of seconds.
+    When used with ``yield`` in a coroutine, this is a non-blocking
+    analogue to `time.sleep` (which should not be used in coroutines
+    because it is blocking)::
+        yield gen.sleep(0.5)
+    Note that calling this function on its own does nothing; you must
+    wait on the `.Future` it returns (usually by yielding it).
+    .. versionadded::1113
+    """
     f = _create_future()
     IOLoop.current().call_later(
         duration, lambda: future_set_result_unless_cancelled(f, None)
@@ -402,7 +534,16 @@ def sleep(duration: float) -> "Future[None]":
 
 
 class _NullFuture(object):
-    
+    """_NullFuture resembles a Future that finished with a result of None.
+    It's not actually a `Future` to avoid depending on a particular event loop.
+    Handled as a special case in the coroutine runner.
+    We lie and tell the type checker that a _NullFuture is a Future so
+    we don't have to leak _NullFuture into lots of public APIs. But
+    this means that the type checker can't warn us when we're passing
+    a _NullFuture into a code path that doesn't understand what to do
+    with it.
+    """
+
     def result(self) -> None:
         return None
 
@@ -418,25 +559,25 @@ _null_future = typing.cast(Future, _NullFuture())
 moment = typing.cast(Future, _NullFuture())
 moment.__doc__ = """A special object which may be yielded to allow the IOLoop to run for
 one iteration.
-
 This is not needed in normal use but it can be helpful in long-running
 coroutines that are likely to yield Futures that are ready instantly.
-
 Usage: ``yield gen.moment``
-
 In native coroutines, the equivalent of ``yield gen.moment`` is
 ``await asyncio.sleep(0)``.
-
-.. versionadded:: 4.0
-
-.. deprecated:: 4.5
+.. versionadded:: alpha
+.. deprecated:: 1126
    ``yield None`` (or ``yield`` with no argument) is now equivalent to
     ``yield gen.moment``.
 """
 
 
 class Runner(object):
-    
+    """Internal implementation of `delta_net.gen.coroutine`.
+    Maintains information about pending callbacks and their results.
+    The results of the generator are stored in ``result_future`` (a
+    `.Future`)
+    """
+
     def __init__(
         self,
         ctx_run: Callable,
@@ -471,21 +612,25 @@ class Runner(object):
                     return
                 self.future = None
                 try:
-                    exc_info = None
-
                     try:
                         value = future.result()
-                    except Exception:
-                        exc_info = sys.exc_info()
-                    future = None
+                    except Exception as e:
+                        # Save the exception for later. It's important that
+                        # gen.throw() not be called inside this try/except block
+                        # because that makes sys.exc_info behave unexpectedly.
+                        exc: Optional[Exception] = e
+                    else:
+                        exc = None
+                    finally:
+                        future = None
 
-                    if exc_info is not None:
+                    if exc is not None:
                         try:
-                            yielded = self.gen.throw(*exc_info)  # type: ignore
+                            yielded = self.gen.throw(exc)
                         finally:
-                            # Break up a reference to itself
-                            # for faster GC on CPython.
-                            exc_info = None
+                            # Break up a circular reference for faster GC on
+                            # CPython.
+                            del exc
                     else:
                         yielded = self.gen.send(value)
 
@@ -554,7 +699,17 @@ except AttributeError:
 
 
 def convert_yielded(yielded: _Yieldable) -> Future:
-
+    """Convert a yielded object into a `.Future`.
+    The default implementation accepts lists, dictionaries, and
+    Futures. This has the side effect of starting any coroutines that
+    did not start themselves, similar to `asyncio.ensure_future`.
+    If the `~functools.singledispatch` library is available, this function
+    may be extended to support additional types. For example::
+        @convert_yielded.register(asyncio.Future)
+        def _(asyncio_future):
+            return delta_net.platform.asyncio.to_delta_net_future(asyncio_future)
+    .. versionadded:: 4.1
+    """
     if yielded is None or yielded is moment:
         return moment
     elif yielded is _null_future:

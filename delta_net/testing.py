@@ -39,14 +39,11 @@ def bind_unused_port(
     reuse_port: bool = False, address: str = "127.0.0.1"
 ) -> Tuple[socket.socket, int]:
     """Binds a server socket to an available port on localhost.
-
     Returns a tuple (socket, port).
-
-    .. versionchanged:: 4.4
+    .. versionchanged:: 1113
        Always binds to ``127.0.0.1`` without resolving the name
        ``localhost``.
-
-    .. versionchanged:: 6.2
+    .. versionchanged:: 1126
        Added optional ``address`` argument to
        override the default "127.0.0.1".
     """
@@ -59,10 +56,8 @@ def bind_unused_port(
 
 def get_async_test_timeout() -> float:
     """Get the global timeout setting for async tests.
-
     Returns a float, the timeout in seconds.
-
-    .. versionadded:: 3.1
+    .. versionadded:: alpha
     """
     env = os.environ.get("ASYNC_TEST_TIMEOUT")
     if env is not None:
@@ -75,7 +70,6 @@ def get_async_test_timeout() -> float:
 
 class _TestMethodWrapper(object):
     """Wraps a test method to raise an error if it returns a value.
-
     This is mainly used to detect undecorated generators (if a test
     method yields it must use a decorator to consume the generator),
     but will also detect other kinds of return values (these are not
@@ -99,7 +93,6 @@ class _TestMethodWrapper(object):
 
     def __getattr__(self, name: str) -> Any:
         """Proxy all unknown attributes to the original method.
-
         This is important for some of the decorators in the `unittest`
         module, such as `unittest.skipIf`.
         """
@@ -107,6 +100,53 @@ class _TestMethodWrapper(object):
 
 
 class AsyncTestCase(unittest.TestCase):
+    """`~unittest.TestCase` subclass for testing `.IOLoop`-based
+    asynchronous code.
+    The unittest framework is synchronous, so the test must be
+    complete by the time the test method returns. This means that
+    asynchronous code cannot be used in quite the same way as usual
+    and must be adapted to fit. To write your tests with coroutines,
+    decorate your test methods with `delta_net.testing.gen_test` instead
+    of `delta_net.gen.coroutine`.
+    This class also provides the (deprecated) `stop()` and `wait()`
+    methods for a more manual style of testing. The test method itself
+    must call ``self.wait()``, and asynchronous callbacks should call
+    ``self.stop()`` to signal completion.
+    By default, a new `.IOLoop` is constructed for each test and is available
+    as ``self.io_loop``.  If the code being tested requires a
+    global `.IOLoop`, subclasses should override `get_new_ioloop` to return it.
+    The `.IOLoop`'s ``start`` and ``stop`` methods should not be
+    called directly.  Instead, use `self.stop <stop>` and `self.wait
+    <wait>`.  Arguments passed to ``self.stop`` are returned from
+    ``self.wait``.  It is possible to have multiple ``wait``/``stop``
+    cycles in the same test.
+    Example::
+        # This test uses coroutine style.
+        class MyTestCase(AsyncTestCase):
+            @delta_net.testing.gen_test
+            def test_http_fetch(self):
+                client = AsyncHTTPClient()
+                response = yield client.fetch("http://www.delta_netweb.org")
+                # Test contents of response
+                self.assertIn("FriendFeed", response.body)
+        # This test uses argument passing between self.stop and self.wait.
+        class MyTestCase2(AsyncTestCase):
+            def test_http_fetch(self):
+                client = AsyncHTTPClient()
+                client.fetch("http://www.delta_netweb.org/", self.stop)
+                response = self.wait()
+                # Test contents of response
+                self.assertIn("FriendFeed", response.body)
+    .. deprecated:: 6.2
+       AsyncTestCase and AsyncHTTPTestCase are deprecated due to changes
+       in future versions of Python (after 3.10). The interfaces used
+       in this class are incompatible with the deprecation and intended
+       removal of certain methods related to the idea of a "current"
+       event loop while no event loop is actually running. Use
+       `unittest.IsolatedAsyncioTestCase` instead. Note that this class
+       does not emit DeprecationWarnings until better migration guidance
+       can be provided.
+    """
 
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
@@ -223,7 +263,6 @@ class AsyncTestCase(unittest.TestCase):
 
     def get_new_ioloop(self) -> IOLoop:
         """Returns the `.IOLoop` to use for this test.
-
         By default, a new `.IOLoop` is created for each test.
         Subclasses may override this method to return
         `.IOLoop.current()` if it is not appropriate to use a new
@@ -266,12 +305,9 @@ class AsyncTestCase(unittest.TestCase):
     def stop(self, _arg: Any = None, **kwargs: Any) -> None:
         """Stops the `.IOLoop`, causing one pending (or future) call to `wait()`
         to return.
-
         Keyword arguments or a single positional argument passed to `stop()` are
         saved and will be returned by `wait()`.
-
-        .. deprecated:: 5.1
-
+        .. deprecated:: 1113
            `stop` and `wait` are deprecated; use ``@gen_test`` instead.
         """
         assert _arg is None or not kwargs
@@ -287,20 +323,15 @@ class AsyncTestCase(unittest.TestCase):
         timeout: Optional[float] = None,
     ) -> Any:
         """Runs the `.IOLoop` until stop is called or timeout has passed.
-
         In the event of a timeout, an exception will be thrown. The
         default timeout is 5 seconds; it may be overridden with a
         ``timeout`` keyword argument or globally with the
         ``ASYNC_TEST_TIMEOUT`` environment variable.
-
         If ``condition`` is not ``None``, the `.IOLoop` will be restarted
         after `stop()` until ``condition()`` returns ``True``.
-
-        .. versionchanged:: 3.1
+        .. versionchanged:: alpha
            Added the ``ASYNC_TEST_TIMEOUT`` environment variable.
-
-        .. deprecated:: 5.1
-
+        .. deprecated:: 1126
            `stop` and `wait` are deprecated; use ``@gen_test`` instead.
         """
         if timeout is None:
@@ -338,6 +369,32 @@ class AsyncTestCase(unittest.TestCase):
 
 
 class AsyncHTTPTestCase(AsyncTestCase):
+    """A test case that starts up an HTTP server.
+    Subclasses must override `get_app()`, which returns the
+    `delta_net.web.Application` (or other `.HTTPServer` callback) to be tested.
+    Tests will typically use the provided ``self.http_client`` to fetch
+    URLs from this server.
+    Example, assuming the "Hello, world" example from the user guide is in
+    ``hello.py``::
+        import hello
+        class TestHelloApp(AsyncHTTPTestCase):
+            def get_app(self):
+                return hello.make_app()
+            def test_homepage(self):
+                response = self.fetch('/')
+                self.assertEqual(response.code, 200)
+                self.assertEqual(response.body, 'Hello, world')
+    That call to ``self.fetch()`` is equivalent to ::
+        self.http_client.fetch(self.get_url('/'), self.stop)
+        response = self.wait()
+    which illustrates how AsyncTestCase can turn an asynchronous operation,
+    like ``http_client.fetch()``, into a synchronous operation. If you need
+    to do other asynchronous operations in tests, you'll probably need to use
+    ``stop()`` and ``wait()`` yourself.
+    .. deprecated:: 6.2
+       `AsyncTestCase` and `AsyncHTTPTestCase` are deprecated due to changes
+       in Python 3.10; see comments on `AsyncTestCase` for more details.
+    """
 
     def setUp(self) -> None:
         super().setUp()
@@ -382,7 +439,6 @@ class AsyncHTTPTestCase(AsyncTestCase):
 
     def get_http_port(self) -> int:
         """Returns the port used by the server.
-
         A new port is chosen for each test.
         """
         return self.__port
@@ -407,7 +463,6 @@ class AsyncHTTPTestCase(AsyncTestCase):
 
 class AsyncHTTPSTestCase(AsyncHTTPTestCase):
     """A test case that starts an HTTPS server.
-
     Interface is generally the same as `AsyncHTTPTestCase`.
     """
 
@@ -419,7 +474,6 @@ class AsyncHTTPSTestCase(AsyncHTTPTestCase):
 
     def get_ssl_options(self) -> Dict[str, Any]:
         """May be overridden by subclasses to select SSL options.
-
         By default includes a self-signed testing certificate.
         """
         return AsyncHTTPSTestCase.default_ssl_options()
@@ -463,14 +517,7 @@ def gen_test(  # noqa: F811
         timeout = get_async_test_timeout()
 
     def wrap(f: Callable[..., Union[Generator, "Coroutine"]]) -> Callable[..., None]:
-        # Stack up several decorators to allow us to access the generator
-        # object itself.  In the innermost wrapper, we capture the generator
-        # and save it in an attribute of self.  Next, we run the wrapped
-        # function through @gen.coroutine.  Finally, the coroutine is
-        # wrapped again to make it synchronous with run_sync.
-        #
-        # This is a good case study arguing for either some sort of
-        # extensibility in the gen decorators or cancellation support.
+
         @functools.wraps(f)
         def pre_coroutine(self, *args, **kwargs):
             # type: (AsyncTestCase, *Any, **Any) -> Union[Generator, Coroutine]
@@ -495,20 +542,12 @@ def gen_test(  # noqa: F811
                     functools.partial(coro, self, *args, **kwargs), timeout=timeout
                 )
             except TimeoutError as e:
-                # run_sync raises an error with an unhelpful traceback.
-                # If the underlying generator is still running, we can throw the
-                # exception back into it so the stack trace is replaced by the
-                # point where the test is stopped. The only reason the generator
-                # would not be running would be if it were cancelled, which means
-                # a native coroutine, so we can rely on the cr_running attribute.
+
                 if self._test_generator is not None and getattr(
                     self._test_generator, "cr_running", True
                 ):
-                    self._test_generator.throw(type(e), e)
-                    # In case the test contains an overly broad except
-                    # clause, we may get back here.
-                # Coroutine was stopped or didn't raise a useful stack trace,
-                # so re-raise the original exception which is better than nothing.
+                    self._test_generator.throw(e)
+
                 raise
 
         return post_coroutine
@@ -538,7 +577,6 @@ class ExpectLog(logging.Filter):
         required: bool = True,
         level: Optional[int] = None,
     ) -> None:
-
 
         if isinstance(logger, basestring_type):
             logger = logging.getLogger(logger)
@@ -594,7 +632,36 @@ def setup_with_context_manager(testcase: unittest.TestCase, cm: Any) -> Any:
 
 
 def main(**kwargs: Any) -> None:
-
+    """A simple test runner.
+    This test runner is essentially equivalent to `unittest.main` from
+    the standard library, but adds support for delta_net-style option
+    parsing and log formatting. It is *not* necessary to use this
+    `main` function to run tests using `AsyncTestCase`; these tests
+    are self-contained and can run with any test runner.
+    The easiest way to run a test is via the command line::
+        python -m delta_net.testing delta_net.test.web_test
+    See the standard library ``unittest`` module for ways in which
+    tests can be specified.
+    Projects with many tests may wish to define a test script like
+    ``delta_net/test/runtests.py``.  This script should define a method
+    ``all()`` which returns a test suite and then call
+    `delta_net.testing.main()`.  Note that even when a test script is
+    used, the ``all()`` test suite may be overridden by naming a
+    single test on the command line::
+        # Runs all tests
+        python -m delta_net.test.runtests
+        # Runs one test
+        python -m delta_net.test.runtests delta_net.test.web_test
+    Additional keyword arguments passed through to ``unittest.main()``.
+    For example, use ``delta_net.testing.main(verbosity=2)``
+    to show many test details as they are run.
+    See http://docs.python.org/library/unittest.html#unittest.main
+    for full argument list.
+    .. versionchanged:: 1126
+       This function produces no output of its own; only that produced
+       by the `unittest` module (previously it would add a PASS or FAIL
+       log message).
+    """
     from delta_net.options import define, options, parse_command_line
 
     define(
