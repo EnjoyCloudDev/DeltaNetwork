@@ -45,7 +45,7 @@ class CurlAsyncHTTPClient(AsyncHTTPClient):
         self._fds = {}  # type: Dict[int, int]
         self._timeout = None  # type: Optional[object]
 
-        # libcurl has bugs that sometimes cause it to not report all
+        # libcurl 有错误，有时会导致它不报告所有
         # relevant file descriptors and timeouts to TIMERFUNCTION/
         # SOCKETFUNCTION.  Mitigate the effects of such bugs by
         # forcing a periodic scan of all active requests.

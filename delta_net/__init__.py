@@ -1,5 +1,6 @@
+# version_info = (主版本号, 次版本号, 迭代, -日期)
 
-# version is a human-readable version number.
+version = "beta_v1.0.0.1226"
+version_info = (1, 0, 0, -1226)
 
-version = "beta_v1.0.0.1113"
-version_info = (1, 0, 0, -1113)
+# Copyright ©2022 EnjoyCloud

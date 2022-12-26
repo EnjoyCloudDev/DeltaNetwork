@@ -20,11 +20,11 @@ class AuthError(Exception):
 
 
 class OpenIdMixin(object):
-    """Abstract implementation of OpenID and Attribute Exchange.
+    """OpenID 和属性交换的抽象实现.
 
     Class attributes:
 
-    * ``_OPENID_ENDPOINT``: the identity provider's URI.
+    * ``_OPENID_ENDPOINT``: 身份提供者的 URI
     """
 
     def authenticate_redirect(
@@ -32,21 +32,17 @@ class OpenIdMixin(object):
         callback_uri: Optional[str] = None,
         ax_attrs: List[str] = ["name", "email", "language", "username"],
     ) -> None:
-        """Redirects to the authentication URL for this service.
+        """重定向到此服务的身份验证 URL。
 
-        After authentication, the service will redirect back to the given
-        callback URI with additional parameters including ``openid.mode``.
+        身份验证后，服务将重定向回给定的
+        带有附加参数的回调 URI，包括 ``openid.mode``
 
-        We request the given attributes for the authenticated user by
-        default (name, email, language, and username). If you don't need
-        all those attributes for your app, you can request fewer with
-        the ax_attrs keyword argument.
+        我们默认为经过身份验证的用户请求给定的属性 (name, email, language, and username).
+        如果您的应用不需要所有这些属性，您可以使用 ax_attrs 关键字参数请求更少的属性。
 
-        .. versionchanged:: 6.0
+        .. versionchanged:: alpha
 
-            The ``callback`` argument was removed and this method no
-            longer returns an awaitable object. It is now an ordinary
-            synchronous function.
+        ``callback`` 参数被删除，此方法不再返回可等待的对象。 它现在是一个普通的同步函数。
         """
         handler = cast(RequestHandler, self)
         callback_uri = callback_uri or handler.request.uri

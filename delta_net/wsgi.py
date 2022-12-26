@@ -15,7 +15,7 @@ if typing.TYPE_CHECKING:
     from _typeshed.wsgi import WSGIApplication as WSGIAppType  # noqa: F401
 
 
-# PEP 3333 specifies that WSGI on python 3 generally deals with byte strings
+# PEP 3333 指定 python 3 上的 WSGI 通常处理字节字符串
 # that are smuggled inside objects of type unicode (via the latin1 encoding).
 # This function is like those in the delta_net.escape module, but defined
 # here to minimize the temptation to use it in non-wsgi contexts.
